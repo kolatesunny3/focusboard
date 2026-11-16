@@ -1,0 +1,725 @@
+// Application window: sidebar, pages, shared popups, and modals.
+import { CheckBox, ComboBox, Date, DatePickerPopup, LineEdit } from "std-widgets.slint";
+import { AppButton, SectionLabel } from "widgets/controls.slint";
+import { ColumnInfo, EditorTask, FieldRow, FieldSettingRow, FilterRow, ListSettingRow, PickOption, TaskRow } from "model.slint";
+import { FiltersPanel, PickerPanel, TasksPage } from "pages/tasks.slint";
+import { SettingsPage } from "pages/settings.slint";
+import { TaskForm } from "widgets/task_form.slint";
+import { Theme } from "theme.slint";
+
+export { Theme } from "theme.slint";
+
+component NavButton inherits Rectangle {
+    in property <string> label;
+    in property <string> glyph;
+    in property <bool> active;
+    in property <bool> collapsed;
+    callback pick;
+
+    height: 34px;
+    border-radius: 8px;
+    background: root.active ? Theme.accent-soft : (touch.has-hover ? Theme.hover : transparent);
+
+    HorizontalLayout {
+        padding-left: root.collapsed ? 8px : 12px;
+        padding-right: root.collapsed ? 8px : 10px;
+        spacing: root.collapsed ? 6px : 8px;
+
+        Text {
+            text: "\u{25CF}";
+            font-size: root.active ? 9px : 7px;
+            color: root.active ? Theme.accent : Theme.border;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.collapsed ? root.glyph : root.label;
+            font-size: root.collapsed ? 12px : 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            color: root.active ? Theme.accent : Theme.text;
+            font-weight: root.active ? 600 : 400;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.pick();
+        }
+        mouse-cursor: pointer;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "FocusBoard";
+    icon: @image-url("../fb.png");
+    // No fixed size: the size is restored (and clamped to the screen) from Rust.
+    // These minimums keep the layout usable when the user shrinks the window.
+    // the table needs ~815px to keep its columns readable, and ~460px tall so the
+    // built-in date picker popup (calendar + its OK/Cancel row) fits inside the window
+    min-width: 830px;
+    min-height: 520px;
+    background: Theme.app-bg;
+    default-font-size: 13px;
+
+    // 0 = follow system, 1 = light, 2 = dark
+    in-out property <int> theme-mode: 0;
+
+    in-out property <bool> sidebar-collapsed;
+    callback set-sidebar-collapsed(bool);
+
+    in-out property <int> page: 0;
+
+    // ---- tasks page data ----
+    in property <[TaskRow]> tasks;
+    in property <[ColumnInfo]> columns;
+    in property <[EditorTask]> editor;
+    in property <[FieldRow]> editor-fields;
+    in property <bool> has-selection;
+    in property <string> selected-id;
+    in property <int> total-count;
+    in property <int> shown-count;
+    in property <int> filter-count;
+    in property <bool> show-archived;
+
+    // ---- settings page data ----
+    in property <[FieldSettingRow]> settings-fields;
+    in property <[ListSettingRow]> settings-lists;
+    in property <string> data-path;
+    in property <string> status-text;
+    in property <[FilterRow]> filter-rows;
+
+    // ---- picker popup ----
+    in-out property <string> picker-title;
+    in-out property <bool> picker-multi;
+    in property <[PickOption]> picker-options;
+
+    // ---- modal ----
+    in-out property <bool> modal-open;
+    in-out property <bool> task-form-editing;
+    in-out property <int> modal-kind: 0; // 1 = field form, 2 = confirm, 3 = task form
+    in-out property <length> modal-height: 340px;
+    in-out property <string> modal-title;
+    in-out property <string> modal-text;
+    in-out property <string> modal-confirm-label: "Delete";
+    in-out property <string> modal-error;
+    in-out property <[string]> modal-type-names;
+    in-out property <int> modal-type-index;
+    in-out property <bool> modal-type-locked;
+    in-out property <[string]> modal-list-names;
+    in-out property <int> modal-list-index;
+    in-out property <bool> modal-required;
+    in-out property <bool> modal-show-in-list;
+
+    // ---- callbacks (tasks) ----
+    callback quick-add(string);
+    callback search(string);
+    callback toggle-archived(bool);
+    callback open-filters;
+    callback clear-filters;
+    callback sort-column(int);
+    callback move-task(int, int);
+    callback select-task(string);
+    callback close-editor;
+    callback edit-title(string);
+    callback edit-description(string);
+    callback edit-field(string, string);
+    callback toggle-checkbox(string, bool);
+    callback select-option(string, int);
+    callback pick-field(string);
+    callback archive-task(string);
+    callback restore-task(string);
+    callback delete-task(string);
+    callback add-task;
+    callback save-task;
+    callback cancel-task;
+    callback option-clicked(string);
+    callback filter-text(string, string);
+    callback filter-op(string, int);
+    callback open-filter-pick(string);
+
+    // ---- callbacks (settings) ----
+    callback field-new;
+    callback field-edit(string);
+    callback field-save;
+    callback field-move(string, int);
+    callback field-archive(string);
+    callback field-restore(string);
+    callback field-delete(string);
+    callback field-toggle-required(string, bool);
+    callback field-toggle-show(string, bool);
+    callback list-add(string);
+    callback list-rename(string, string);
+    callback list-move(string, int);
+    callback list-archive(string);
+    callback list-restore(string);
+    callback list-delete(string);
+    callback option-add(string, string);
+    callback option-rename(string, string);
+    callback option-color(string, string);
+    callback option-move(string, int);
+    callback option-archive(string);
+    callback option-restore(string);
+    callback option-delete(string);
+    callback open-data-folder;
+    callback open-backups-folder;
+    callback export-data;
+    callback import-data;
+    callback set-theme(int);
+    callback confirm-yes;
+
+    // ---- callbacks invoked from Rust ----
+    callback open-picker(string, bool);
+    callback close-picker;
+    callback open-date-picker(int, int, int);
+    callback date-accepted(int, int, int);
+
+    HorizontalLayout {
+        // ---------- sidebar ----------
+        Rectangle {
+            width: root.sidebar-collapsed ? 68px : 200px;
+            background: Theme.surface;
+
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                height: parent.height;
+                background: Theme.border;
+            }
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 4px;
+
+                if root.sidebar-collapsed: HorizontalLayout {
+                    height: 40px;
+
+                    AppButton {
+                        horizontal-stretch: 0;
+                        quiet: true;
+                        text: "\u{00BB}";
+                        clicked => {
+                            root.sidebar-collapsed = false;
+                            root.set-sidebar-collapsed(false);
+                        }
+                    }
+                }
+
+                if !root.sidebar-collapsed: HorizontalLayout {
+                    height: 40px;
+                    spacing: 9px;
+
+                    Image {
+                        source: @image-url("../fb.png");
+                        width: 26px;
+                        height: 26px;
+                    }
+
+                    Text {
+                        text: "FocusBoard";
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        color: Theme.text;
+                    }
+
+                    AppButton {
+                        horizontal-stretch: 0;
+                        quiet: true;
+                        text: "\u{00AB}";
+                        clicked => {
+                            root.sidebar-collapsed = true;
+                            root.set-sidebar-collapsed(true);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 4px;
+                }
+
+                NavButton {
+                    label: "Tasks";
+                    glyph: "T";
+                    collapsed: root.sidebar-collapsed;
+                    active: root.page == 0;
+                    pick => {
+                        root.page = 0;
+                    }
+                }
+
+                NavButton {
+                    label: "Settings";
+                    glyph: "S";
+                    collapsed: root.sidebar-collapsed;
+                    active: root.page == 1;
+                    pick => {
+                        root.page = 1;
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.hairline;
+                }
+
+                if !root.sidebar-collapsed: Text {
+                    text: root.status-text;
+                    color: Theme.muted;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // ---------- pages ----------
+        if root.page == 0: TasksPage {
+            horizontal-stretch: 1;
+            tasks: root.tasks;
+            columns: root.columns;
+            selected-id: root.selected-id;
+            total-count: root.total-count;
+            shown-count: root.shown-count;
+            filter-count: root.filter-count;
+            show-archived: root.show-archived;
+            quick-add(t) => {
+                root.quick-add(t);
+            }
+            search(t) => {
+                root.search(t);
+            }
+            toggle-archived(v) => {
+                root.toggle-archived(v);
+            }
+            open-filters => {
+                root.open-filters();
+            }
+            sort-column(i) => {
+                root.sort-column(i);
+            }
+            move-task(from, to) => {
+                root.move-task(from, to);
+            }
+            select-task(id) => {
+                root.select-task(id);
+            }
+            add-task => {
+                root.add-task();
+            }
+        }
+
+        if root.page == 1: SettingsPage {
+            horizontal-stretch: 1;
+            fields: root.settings-fields;
+            lists: root.settings-lists;
+            data-path: root.data-path;
+            theme-index: root.theme-mode;
+            field-new => {
+                root.field-new();
+            }
+            field-edit(id) => {
+                root.field-edit(id);
+            }
+            field-move(id, dir) => {
+                root.field-move(id, dir);
+            }
+            field-archive(id) => {
+                root.field-archive(id);
+            }
+            field-restore(id) => {
+                root.field-restore(id);
+            }
+            field-delete(id) => {
+                root.field-delete(id);
+            }
+            field-toggle-required(id, v) => {
+                root.field-toggle-required(id, v);
+            }
+            field-toggle-show(id, v) => {
+                root.field-toggle-show(id, v);
+            }
+            list-add(name) => {
+                root.list-add(name);
+            }
+            list-rename(id, name) => {
+                root.list-rename(id, name);
+            }
+            list-move(id, dir) => {
+                root.list-move(id, dir);
+            }
+            list-archive(id) => {
+                root.list-archive(id);
+            }
+            list-restore(id) => {
+                root.list-restore(id);
+            }
+            list-delete(id) => {
+                root.list-delete(id);
+            }
+            option-add(id, label) => {
+                root.option-add(id, label);
+            }
+            option-rename(id, label) => {
+                root.option-rename(id, label);
+            }
+            option-color(id, hex) => {
+                root.option-color(id, hex);
+            }
+            option-move(id, dir) => {
+                root.option-move(id, dir);
+            }
+            option-archive(id) => {
+                root.option-archive(id);
+            }
+            option-restore(id) => {
+                root.option-restore(id);
+            }
+            option-delete(id) => {
+                root.option-delete(id);
+            }
+            open-data-folder => {
+                root.open-data-folder();
+            }
+            open-backups-folder => {
+                root.open-backups-folder();
+            }
+            export-data => {
+                root.export-data();
+            }
+            import-data => {
+                root.import-data();
+            }
+            set-theme(i) => {
+                root.set-theme(i);
+            }
+        }
+    }
+
+    // ---------- picker popup ----------
+    picker := PopupWindow {
+        width: 340px;
+        height: min(460px, root.height - 140px);
+        x: (root.width - 340px) / 2;
+        y: 80px;
+        close-policy: close-on-click-outside;
+
+        PickerPanel {
+            title: root.picker-title;
+            multi: root.picker-multi;
+            options: root.picker-options;
+            option-clicked(id) => {
+                root.option-clicked(id);
+            }
+            close-requested => {
+                picker.close();
+            }
+        }
+    }
+
+    // ---------- filters popup ----------
+    filters-popup := PopupWindow {
+        width: 420px;
+        height: min(520px, root.height - 140px);
+        x: (root.width - 420px) / 2;
+        y: 80px;
+        close-policy: close-on-click-outside;
+
+        FiltersPanel {
+            rows: root.filter-rows;
+            text-changed(id, t) => {
+                root.filter-text(id, t);
+            }
+            op-changed(id, i) => {
+                root.filter-op(id, i);
+            }
+            open-pick(id) => {
+                root.open-filter-pick(id);
+            }
+            clear-all => {
+                root.clear-filters();
+            }
+            close-requested => {
+                filters-popup.close();
+            }
+        }
+    }
+
+    // ---------- date picker ----------
+    in-out property <int> date-year: 2000;
+    in-out property <int> date-month: 1;
+    in-out property <int> date-day: 1;
+
+    date-picker := DatePickerPopup {
+        title: "Pick a date";
+        x: (root.width - 340px) / 2;
+        y: 120px;
+        date: { year: root.date-year, month: root.date-month, day: root.date-day };
+        accepted(d) => {
+            root.date-accepted(d.year, d.month, d.day);
+        }
+    }
+
+    // ---------- handlers for Rust-invoked callbacks ----------
+    open-picker(title, multi) => {
+        root.picker-title = title;
+        root.picker-multi = multi;
+        picker.show();
+    }
+
+    close-picker => {
+        picker.close();
+    }
+
+    open-filters => {
+        filters-popup.show();
+    }
+
+    open-date-picker(y, m, d) => {
+        root.date-year = y;
+        root.date-month = m;
+        root.date-day = d;
+        date-picker.show();
+    }
+
+    // ---------- modal ----------
+    if root.modal-open: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000055;
+
+        TouchArea {
+        }
+
+        Rectangle {
+            width: root.modal-kind == 3 ? 540px : 460px;
+            height: root.height - 40px < root.modal-height ? root.height - 40px : root.modal-height;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            background: Theme.surface;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            // field form
+            if root.modal-kind == 1: VerticalLayout {
+                padding: 18px;
+                spacing: 8px;
+
+                Text {
+                    text: root.modal-title;
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+
+                SectionLabel {
+                    text: "LABEL";
+                }
+
+                LineEdit {
+                    text: root.modal-text;
+                    edited(t) => {
+                        root.modal-text = t;
+                    }
+                }
+
+                SectionLabel {
+                    text: "TYPE";
+                }
+
+                ComboBox {
+                    enabled: !root.modal-type-locked;
+                    model: root.modal-type-names;
+                    current-index: root.modal-type-index;
+                    selected => {
+                        root.modal-type-index = self.current-index;
+                        // The card height is fixed; keep it in step with the content
+                        // (the list picker appears for dropdown kinds).
+                        root.modal-height =
+                            (self.current-index == 6 || self.current-index == 7) ? 365px : 310px;
+                    }
+                }
+
+                // Fixed slots: the form height must not jump when the hint or the
+                // error line appears, otherwise the card (fixed height) clips it.
+                Text {
+                    text: root.modal-type-locked ? "Type is locked: this field already has values." : "";
+                    color: Theme.muted;
+                    font-size: 11px;
+                    height: 16px;
+                    overflow: elide;
+                }
+
+                if root.modal-type-index == 6 || root.modal-type-index == 7: VerticalLayout {
+                    spacing: 4px;
+
+                    SectionLabel {
+                        text: "DROPDOWN LIST";
+                    }
+
+                    ComboBox {
+                        model: root.modal-list-names;
+                        current-index: root.modal-list-index;
+                        selected => {
+                            root.modal-list-index = self.current-index;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 14px;
+
+                    CheckBox {
+                        text: "Required";
+                        checked: root.modal-required;
+                        toggled => {
+                            root.modal-required = self.checked;
+                        }
+                    }
+
+                    CheckBox {
+                        text: "Show in list";
+                        checked: root.modal-show-in-list;
+                        toggled => {
+                            root.modal-show-in-list = self.checked;
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.modal-error;
+                    color: Theme.danger;
+                    font-size: 12px;
+                    height: 18px;
+                    overflow: elide;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+
+                    AppButton {
+                        quiet: true;
+                        text: "Cancel";
+                        clicked => {
+                            root.modal-open = false;
+                        }
+                    }
+
+                    AppButton {
+                        primary: true;
+                        text: "Save";
+                        clicked => {
+                            root.field-save();
+                        }
+                    }
+                }
+            }
+
+            // task create / edit form (draft is only committed on Save)
+            if root.modal-kind == 3: TaskForm {
+                editor: root.editor;
+                fields: root.editor-fields;
+                form-title: root.modal-title;
+                error: root.modal-error;
+                editing: root.task-form-editing;
+
+                edit-title(t) => {
+                    root.edit-title(t);
+                }
+                edit-description(t) => {
+                    root.edit-description(t);
+                }
+                edit-field(id, t) => {
+                    root.edit-field(id, t);
+                }
+                toggle-checkbox(id, c) => {
+                    root.toggle-checkbox(id, c);
+                }
+                select-option(id, i) => {
+                    root.select-option(id, i);
+                }
+                pick-field(id) => {
+                    root.pick-field(id);
+                }
+                archive(id) => {
+                    root.archive-task(id);
+                }
+                restore(id) => {
+                    root.restore-task(id);
+                }
+                delete-task(id) => {
+                    root.delete-task(id);
+                }
+                cancel => {
+                    root.cancel-task();
+                }
+                save => {
+                    root.save-task();
+                }
+            }
+
+            // confirm dialog
+            if root.modal-kind == 2: VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+
+                Text {
+                    text: root.modal-title;
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+
+                Text {
+                    text: root.modal-text;
+                    wrap: word-wrap;
+                    color: Theme.text;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+
+                    AppButton {
+                        quiet: true;
+                        text: "Cancel";
+                        clicked => {
+                            root.modal-open = false;
+                        }
+                    }
+
+                    AppButton {
+                        danger: true;
+                        text: root.modal-confirm-label;
+                        clicked => {
+                            root.modal-open = false;
+                            root.confirm-yes();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

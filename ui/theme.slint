@@ -1,0 +1,67 @@
+// Shared look-and-feel: colours, spacing, and the tasks-grid column geometry.
+import { Palette } from "std-widgets.slint";
+
+export global Theme {
+    out property <length> gap: 8px;
+    out property <length> radius: 10px;
+    out property <length> pad: 12px;
+
+    // Height of one row in the tasks grid. Rows sit flush, so this doubles as the
+    // distance the drag & drop code divides by (see NavRow in pages/tasks.slint).
+    out property <length> row-height: 32px;
+
+    // True when the dark palette is in effect. Rust resolves "follow system" to a
+    // concrete light/dark value before calling apply-scheme, so this never has to
+    // guess (Slint only exposes the system scheme to its own bundled styles).
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+
+    // Surfaces
+    out property <brush> app-bg: dark ? #0e1016 : #eef1f8;
+    out property <brush> surface: dark ? #181b22 : #ffffff;
+    out property <brush> surface-2: dark ? #1f232c : #f5f7fd;
+    out property <brush> hover: dark ? #252a35 : #f1f4fb;
+    out property <brush> border: dark ? #2b303c : #e3e7f1;
+    out property <brush> hairline: dark ? #232833 : #edf0f7;
+
+    // Text
+    out property <brush> text: dark ? #e7eaf3 : #1c2230;
+    out property <brush> muted: dark ? #98a1b4 : #6b7280;
+
+    // Accent and status
+    out property <brush> accent: dark ? #8b8cf8 : #4f46e5;
+    out property <brush> accent-hover: dark ? #a3a4ff : #4338ca;
+    out property <brush> accent-soft: dark ? #232743 : #ecebff;
+    out property <brush> on-accent: dark ? #12142a : #ffffff;
+    out property <brush> danger: dark ? #f87171 : #d92d20;
+    out property <brush> danger-soft: dark ? #3a2126 : #fdeceb;
+    out property <brush> success: dark ? #4ade80 : #16a34a;
+
+    // Alpha of the coloured chips that show dropdown values in the grid.
+    out property <float> chip-bg: dark ? 0.26 : 0.13;
+    out property <float> chip-border: dark ? 0.5 : 0.28;
+
+    // ---- tasks grid geometry ----
+    // One unit is (width - paddings - gaps) / (5 + 2 * attribute columns): the
+    // title column is five units wide, every attribute column two. The header and
+    // the rows both ask these functions, so a column cannot drift away from its
+    // heading. `total` is the width of the row (or header), `count` the number of
+    // columns, title included.
+    public pure function grid-unit(total: length, count: int) -> length {
+        return count < 1 ? 0px : (total - 16px - (count - 1) * 6px) / (5 + (count - 1) * 2);
+    }
+
+    public pure function grid-x(index: int, total: length, count: int) -> length {
+        return index <= 0 ? 8px : 8px + grid-unit(total, count) * (5 + (index - 1) * 2) + index * 6px;
+    }
+
+    public pure function grid-width(index: int, total: length, count: int) -> length {
+        return index <= 0 ? grid-unit(total, count) * 5 : grid-unit(total, count) * 2;
+    }
+
+    // Called from Rust to switch the whole app theme: 0 = system, 1 = light, 2 = dark.
+    public function apply-scheme(mode: int) {
+        Palette.color-scheme = mode == 1
+            ? ColorScheme.light
+            : (mode == 2 ? ColorScheme.dark : ColorScheme.unknown);
+    }
+}

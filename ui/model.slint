@@ -1,0 +1,85 @@
+// Data structures exchanged between the Rust backend and the UI.
+
+export struct TableCell {
+    text: string,
+    dot: color,
+    has-dot: bool,
+}
+
+export struct TaskRow {
+    id: string,
+    title: string,
+    cells: [TableCell],
+    archived: bool,
+    meta: string,
+}
+
+export struct ColumnInfo {
+    label: string,
+    sort: int, // 0 none, 1 ascending, 2 descending
+}
+
+export struct EditorTask {
+    id: string,
+    title: string,
+    description: string,
+    archived: bool,
+}
+
+export struct FieldRow {
+    id: string,
+    label: string,
+    kind: int,
+    text: string,
+    checked: bool,
+    value-label: string,
+    error: string,
+    // Single-select fields only: index 0 is "Choose\u{2026}", the rest are
+    // option labels; option-index is the current selection.
+    options: [string],
+    option-index: int,
+}
+
+export struct FilterRow {
+    field-id: string,
+    label: string,
+    kind: int, // 0 text/number, 1 date/datetime, 2 checkbox, 3 select/multiselect
+    text: string,
+    op-index: int,
+    ops: [string],
+    summary: string,
+}
+
+export struct FieldSettingRow {
+    id: string,
+    label: string,
+    type-name: string,
+    list-name: string,
+    required: bool,
+    show-in-list: bool,
+    archived: bool,
+}
+
+export struct OptionSettingRow {
+    id: string,
+    label: string,
+    swatch: color,
+    hex: string,
+    archived: bool,
+}
+
+export struct ListSettingRow {
+    id: string,
+    name: string,
+    archived: bool,
+    option-count: int,
+    options: [OptionSettingRow],
+}
+
+export struct PickOption {
+    id: string,
+    label: string,
+    swatch: color,
+    selected: bool,
+    archived: bool,
+}

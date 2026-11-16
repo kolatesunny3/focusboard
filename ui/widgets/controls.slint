@@ -1,0 +1,87 @@
+// Small building blocks shared by the pages: buttons that follow the app palette
+// and coloured chips used for dropdown values.
+import { Theme } from "../theme.slint";
+
+export component AppButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    // Quiet buttons have no border or fill until hovered (used for Close, Cancel).
+    in property <bool> quiet: false;
+
+    callback clicked;
+
+    height: 30px;
+    border-radius: 8px;
+    border-width: primary || quiet ? 0px : 1px;
+    border-color: danger ? Theme.danger.with-alpha(0.35) : Theme.border;
+    background: primary
+        ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : (touch.has-hover ? (danger ? Theme.danger-soft : Theme.hover) : (quiet ? transparent : Theme.surface));
+
+    HorizontalLayout {
+        padding-left: 16px;
+        // a couple of extra pixels: Slint's elide check is a hair stricter than
+        // the preferred width it reports, so a tight button would say "Open data fol…"
+        padding-right: 18px;
+        spacing: 4px;
+
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: 13px;
+            font-weight: root.primary ? 600 : 500;
+            color: root.primary ? Theme.on-accent : (root.danger ? Theme.danger : Theme.text);
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+        mouse-cursor: pointer;
+    }
+}
+
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <brush> tint: #4f46e5;
+    // Plain chips are a grey pill without a dot (used for tags like "archived").
+    in property <bool> plain: false;
+
+    height: 21px;
+    border-radius: 11px;
+    background: plain ? Theme.surface-2 : tint.with-alpha(Theme.chip-bg);
+    border-width: plain ? 0px : 1px;
+    border-color: tint.with-alpha(Theme.chip-border);
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 13px;
+        spacing: 5px;
+
+        if !root.plain: Text {
+            text: "\u{25CF}";
+            color: root.tint;
+            font-size: 8px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            color: plain ? Theme.muted : Theme.text;
+        }
+    }
+}
+
+export component SectionLabel inherits Text {
+    color: Theme.muted;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}

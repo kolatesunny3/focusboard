@@ -1,0 +1,5 @@
+# Linker for the windows-gnu target (MinGW-w64, per-user install via winget).
+# Rust's bundled mingw shim lacks dlltool/as, which the windows-* crates need,
+# so use the full MinGW gcc from PATH. build.rs likewise expects windres on PATH.
+[target.x86_64-pc-windows-gnu]
+linker = "gcc"

@@ -1,0 +1,135 @@
+// One editable attribute row in the task editor, rendered per field kind.
+import { CheckBox, ComboBox, LineEdit, TextEdit } from "std-widgets.slint";
+import { AppButton } from "./controls.slint";
+import { FieldRow } from "../model.slint";
+import { Theme } from "../theme.slint";
+
+export component FieldEditorRow inherits VerticalLayout {
+    in property <FieldRow> data;
+
+    // field-id, new text
+    callback edit(string, string);
+    // field-id, checked
+    callback toggle(string, bool);
+    // field-id, selected option index (0 = no choice) for single-select fields
+    callback select(string, int);
+    // field-id -> open the date picker or the multi-select picker
+    callback pick(string);
+
+    spacing: 4px;
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+
+        Text {
+            width: 96px;
+            text: root.data.label.to-uppercase();
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            vertical-alignment: center;
+            overflow: elide;
+            color: Theme.muted;
+        }
+
+        // text / number / datetime
+        if root.data.kind == 0 || root.data.kind == 2 || root.data.kind == 4: LineEdit {
+            horizontal-stretch: 1;
+            text: root.data.text;
+            input-type: root.data.kind == 2 ? InputType.number : InputType.text;
+            edited(t) => {
+                root.edit(root.data.id, t);
+            }
+        }
+
+        // date
+        if root.data.kind == 3: HorizontalLayout {
+            spacing: 6px;
+            horizontal-stretch: 1;
+
+            LineEdit {
+                horizontal-stretch: 1;
+                text: root.data.text;
+                placeholder-text: "YYYY-MM-DD";
+                edited(t) => {
+                    root.edit(root.data.id, t);
+                }
+            }
+
+            AppButton {
+                quiet: true;
+                text: "Pick";
+                clicked => {
+                    root.pick(root.data.id);
+                }
+            }
+        }
+
+        // longtext
+        if root.data.kind == 1: TextEdit {
+            horizontal-stretch: 1;
+            min-height: 68px;
+            text: root.data.text;
+            edited(t) => {
+                root.edit(root.data.id, t);
+            }
+        }
+
+        // checkbox
+        if root.data.kind == 5: HorizontalLayout {
+            horizontal-stretch: 1;
+
+            CheckBox {
+                checked: root.data.checked;
+                toggled => {
+                    root.toggle(root.data.id, !root.data.checked);
+                }
+            }
+        }
+
+        // single select: an inline dropdown, no extra popup to hunt for
+        if root.data.kind == 6: ComboBox {
+            horizontal-stretch: 1;
+            model: root.data.options;
+            current-index: root.data.option-index;
+            selected => {
+                root.select(root.data.id, self.current-index);
+            }
+        }
+
+        // multiselect still needs the checkbox picker (a combo holds one value)
+        if root.data.kind == 7: Rectangle {
+            horizontal-stretch: 1;
+            min-height: 32px;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: pick-touch.has-hover ? Theme.accent : Theme.border;
+            background: Theme.surface-2;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+
+                Text {
+                    text: root.data.value-label == "" ? "Choose\u{2026}" : root.data.value-label;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    color: root.data.value-label == "" ? Theme.muted : Theme.text;
+                }
+            }
+
+            pick-touch := TouchArea {
+                clicked => {
+                    root.pick(root.data.id);
+                }
+                mouse-cursor: pointer;
+            }
+        }
+    }
+
+    if root.data.error != "": Text {
+        text: root.data.error;
+        color: Theme.danger;
+        font-size: 11px;
+    }
+}

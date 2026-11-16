@@ -1,0 +1,623 @@
+// Settings page: fields, dropdown lists, and data management.
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { AppButton } from "../widgets/controls.slint";
+import { FieldSettingRow, ListSettingRow } from "../model.slint";
+import { Theme } from "../theme.slint";
+
+component TabButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback pick;
+
+    height: 32px;
+    border-radius: 8px;
+    background: active ? Theme.accent-soft : (touch.has-hover ? Theme.hover : transparent);
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+
+        Text {
+            text: label;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 13px;
+            font-weight: active ? 600 : 400;
+            color: active ? Theme.accent : Theme.muted;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.pick();
+        }
+        mouse-cursor: pointer;
+    }
+}
+
+// A white card with a border, used for the sections of the page.
+component Card inherits Rectangle {
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.surface;
+}
+
+export component SettingsPage inherits Rectangle {
+    in property <[FieldSettingRow]> fields;
+    in property <[ListSettingRow]> lists;
+    in property <string> data-path;
+    in property <int> theme-index;
+
+    callback field-new;
+    callback field-edit(string);
+    callback field-move(string, int);
+    callback field-archive(string);
+    callback field-restore(string);
+    callback field-delete(string);
+    callback field-toggle-required(string, bool);
+    callback field-toggle-show(string, bool);
+    callback list-add(string);
+    callback list-rename(string, string);
+    callback list-move(string, int);
+    callback list-archive(string);
+    callback list-restore(string);
+    callback list-delete(string);
+    callback option-add(string, string);
+    callback option-rename(string, string);
+    callback option-color(string, string);
+    callback option-move(string, int);
+    callback option-archive(string);
+    callback option-restore(string);
+    callback option-delete(string);
+    callback open-data-folder;
+    callback open-backups-folder;
+    callback export-data;
+    callback import-data;
+    callback set-theme(int);
+
+    in-out property <int> tab: 0;
+
+    background: Theme.app-bg;
+
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+
+        HorizontalLayout {
+            height: 30px;
+            spacing: 8px;
+
+            Text {
+                text: "Settings";
+                font-size: 18px;
+                font-weight: 700;
+                vertical-alignment: center;
+                color: Theme.text;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 4px;
+
+            TabButton {
+                label: "Fields";
+                active: root.tab == 0;
+                pick => {
+                    root.tab = 0;
+                }
+            }
+
+            TabButton {
+                label: "Lists";
+                active: root.tab == 1;
+                pick => {
+                    root.tab = 1;
+                }
+            }
+
+            TabButton {
+                label: "Data";
+                active: root.tab == 2;
+                pick => {
+                    root.tab = 2;
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+        }
+
+        // ---------- fields ----------
+        if root.tab == 0: VerticalLayout {
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                AppButton {
+                    primary: true;
+                    text: "+ Add field";
+                    clicked => {
+                        root.field-new();
+                    }
+                }
+
+                Text {
+                    text: "Columns marked \u{201C}Column\u{201D} appear in the task table (first 5).";
+                    color: Theme.muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    spacing: 6px;
+
+                    for f in root.fields: Rectangle {
+                        height: 38px;
+                        border-radius: Theme.radius;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        background: Theme.surface;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 6px;
+                            spacing: 8px;
+
+                            Text {
+                                min-width: 70px;
+                                preferred-width: 150px;
+                                horizontal-stretch: 1;
+                                text: f.label;
+                                font-weight: 500;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                color: Theme.text;
+                            }
+
+                            Text {
+                                min-width: 70px;
+                                preferred-width: 140px;
+                                horizontal-stretch: 1;
+                                text: f.type-name + (f.list-name != "" ? " \u{2192} " + f.list-name : "");
+                                color: Theme.muted;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            CheckBox {
+                                text: "Required";
+                                checked: f.required;
+                                toggled => {
+                                    root.field-toggle-required(f.id, self.checked);
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Column";
+                                checked: f.show-in-list;
+                                toggled => {
+                                    root.field-toggle-show(f.id, self.checked);
+                                }
+                            }
+
+                            if f.archived: Text {
+                                text: "archived";
+                                color: Theme.muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+
+                            Button {
+                                width: 30px;
+                                text: "\u{2191}";
+                                clicked => {
+                                    root.field-move(f.id, -1);
+                                }
+                            }
+
+                            Button {
+                                width: 30px;
+                                text: "\u{2193}";
+                                clicked => {
+                                    root.field-move(f.id, 1);
+                                }
+                            }
+
+                            Button {
+                                text: "Edit";
+                                clicked => {
+                                    root.field-edit(f.id);
+                                }
+                            }
+
+                            if !f.archived: Button {
+                                text: "Archive";
+                                clicked => {
+                                    root.field-archive(f.id);
+                                }
+                            }
+
+                            if f.archived: Button {
+                                text: "Restore";
+                                clicked => {
+                                    root.field-restore(f.id);
+                                }
+                            }
+
+                            if f.archived: Button {
+                                text: "Delete";
+                                clicked => {
+                                    root.field-delete(f.id);
+                                }
+                            }
+                        }
+                    }
+
+                    if root.fields.length == 0: VerticalLayout {
+                        padding-top: 24px;
+
+                        Text {
+                            text: "No fields yet \u{2014} add one to describe your tasks.";
+                            color: Theme.muted;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---------- dropdown lists ----------
+        if root.tab == 1: VerticalLayout {
+            spacing: 8px;
+
+            ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    spacing: 8px;
+
+                    for l in root.lists: Card {
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+
+                                LineEdit {
+                                    width: 220px;
+                                    text: l.name;
+                                    edited(t) => {
+                                        root.list-rename(l.id, t);
+                                    }
+                                }
+
+                                Text {
+                                    text: l.option-count + " options" + (l.archived ? " \u{00B7} archived" : "");
+                                    color: Theme.muted;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Button {
+                                    width: 30px;
+                                    text: "\u{2191}";
+                                    clicked => {
+                                        root.list-move(l.id, -1);
+                                    }
+                                }
+
+                                Button {
+                                    width: 30px;
+                                    text: "\u{2193}";
+                                    clicked => {
+                                        root.list-move(l.id, 1);
+                                    }
+                                }
+
+                                if l.archived: Button {
+                                    text: "Restore";
+                                    clicked => {
+                                        root.list-restore(l.id);
+                                    }
+                                }
+
+                                if !l.archived: Button {
+                                    text: "Archive";
+                                    clicked => {
+                                        root.list-archive(l.id);
+                                    }
+                                }
+
+                                Button {
+                                    text: "Delete";
+                                    clicked => {
+                                        root.list-delete(l.id);
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 1px;
+                                background: Theme.hairline;
+                            }
+
+                            for o in l.options: HorizontalLayout {
+                                spacing: 8px;
+
+                                Text {
+                                    text: "\u{25CF}";
+                                    color: o.swatch;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: o.label;
+                                    edited(t) => {
+                                        root.option-rename(o.id, t);
+                                    }
+                                }
+
+                                LineEdit {
+                                    width: 100px;
+                                    text: o.hex;
+                                    placeholder-text: "#rrggbb";
+                                    edited(t) => {
+                                        root.option-color(o.id, t);
+                                    }
+                                }
+
+                                if o.archived: Text {
+                                    text: "archived";
+                                    color: Theme.muted;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+
+                                Button {
+                                    width: 30px;
+                                    text: "\u{2191}";
+                                    clicked => {
+                                        root.option-move(o.id, -1);
+                                    }
+                                }
+
+                                Button {
+                                    width: 30px;
+                                    text: "\u{2193}";
+                                    clicked => {
+                                        root.option-move(o.id, 1);
+                                    }
+                                }
+
+                                if !o.archived: Button {
+                                    text: "Archive";
+                                    clicked => {
+                                        root.option-archive(o.id);
+                                    }
+                                }
+
+                                if o.archived: Button {
+                                    text: "Restore";
+                                    clicked => {
+                                        root.option-restore(o.id);
+                                    }
+                                }
+
+                                Button {
+                                    text: "Delete";
+                                    clicked => {
+                                        root.option-delete(o.id);
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 1px;
+                                background: Theme.hairline;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+
+                                option-new := LineEdit {
+                                    width: 220px;
+                                    placeholder-text: "New option\u{2026}";
+                                    accepted(t) => {
+                                        root.option-add(l.id, t);
+                                        self.text = "";
+                                    }
+                                }
+
+                                AppButton {
+                                    quiet: true;
+                                    text: "+ Add option";
+                                    clicked => {
+                                        root.option-add(l.id, option-new.text);
+                                        option-new.text = "";
+                                    }
+                                }
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        list-new := LineEdit {
+                            width: 220px;
+                            placeholder-text: "New list name\u{2026}";
+                            accepted(t) => {
+                                root.list-add(t);
+                                self.text = "";
+                            }
+                        }
+
+                        AppButton {
+                            quiet: true;
+                            text: "+ Add list";
+                            clicked => {
+                                root.list-add(list-new.text);
+                                list-new.text = "";
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    // Absorbs the surplus so the list cards keep their natural height.
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
+                }
+            }
+        }
+
+        // ---------- data ----------
+        if root.tab == 2: ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 8px;
+
+                Card {
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+
+                        Text {
+                            text: "Data folder";
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+
+                        Text {
+                            text: root.data-path;
+                            color: Theme.muted;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            AppButton {
+                                text: "Open data folder";
+                                clicked => {
+                                    root.open-data-folder();
+                                }
+                            }
+
+                            AppButton {
+                                text: "Open backups";
+                                clicked => {
+                                    root.open-backups-folder();
+                                }
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                            }
+                        }
+                    }
+                }
+
+                Card {
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+
+                        Text {
+                            text: "Export / import";
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+
+                        Text {
+                            text: "Copies of the four JSON files, for backups or moving to another machine. Import backs up the current files first.";
+                            color: Theme.muted;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            AppButton {
+                                text: "Export\u{2026}";
+                                clicked => {
+                                    root.export-data();
+                                }
+                            }
+
+                            AppButton {
+                                text: "Import\u{2026}";
+                                clicked => {
+                                    root.import-data();
+                                }
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                            }
+                        }
+                    }
+                }
+
+                Card {
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+
+                        Text {
+                            text: "Appearance";
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+
+                        ComboBox {
+                            width: 190px;
+                            model: ["Follow system", "Light", "Dark"];
+                            current-index: root.theme-index;
+                            selected => {
+                                root.set-theme(self.current-index);
+                            }
+                        }
+                    }
+                }
+
+                // Absorbs the leftover height so the cards keep their natural size
+                // instead of being stretched to fill the scroll viewport.
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+            }
+        }
+    }
+}

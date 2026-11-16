@@ -1,0 +1,185 @@
+// Task create/edit form, shown as a modal. Edits go to a draft in Rust;
+// nothing is stored until Save is clicked.
+import { LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
+import { AppButton } from "./controls.slint";
+import { FieldEditorRow } from "./field_editor.slint";
+import { EditorTask, FieldRow } from "../model.slint";
+import { Theme } from "../theme.slint";
+
+export component TaskForm inherits Rectangle {
+    in property <[EditorTask]> editor;
+    in property <[FieldRow]> fields;
+    in property <string> form-title;
+    in property <string> error;
+    in property <bool> editing;
+
+    callback edit-title(string);
+    callback edit-description(string);
+    callback edit-field(string, string);
+    callback toggle-checkbox(string, bool);
+    callback select-option(string, int);
+    callback pick-field(string);
+    callback cancel;
+    callback save;
+    callback archive(string);
+    callback restore(string);
+    callback delete-task(string);
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+
+        Rectangle {
+            height: 26px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.form-title;
+                    font-size: 16px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    color: Theme.text;
+                }
+                AppButton {
+                    quiet: true;
+                    text: "Close";
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+            }
+        }
+
+        // Fixed heights: fluent inputs claim vertical stretch and would eat the
+        // whole form if the layout had surplus space.
+        for ed in root.editor: VerticalLayout {
+            spacing: 8px;
+
+            LineEdit {
+                height: 36px;
+                text: ed.title;
+                font-size: 14px;
+                placeholder-text: "Task title";
+                edited(t) => {
+                    root.edit-title(t);
+                }
+            }
+
+            TextEdit {
+                height: 110px;
+                text: ed.description;
+                placeholder-text: "Description\u{2026}";
+                edited(t) => {
+                    root.edit-description(t);
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.hairline;
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                padding-right: 6px;
+                spacing: 10px;
+
+                for f in root.fields: FieldEditorRow {
+                    data: f;
+                    edit(id, t) => {
+                        root.edit-field(id, t);
+                    }
+                    toggle(id, c) => {
+                        root.toggle-checkbox(id, c);
+                    }
+                    select(id, i) => {
+                        root.select-option(id, i);
+                    }
+                    pick(id) => {
+                        root.pick-field(id);
+                    }
+                }
+
+                // Keeps the rows at their natural height.
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+            }
+        }
+
+        // Fixed slot: a form-level error must not resize the card.
+        Text {
+            text: root.error;
+            color: Theme.danger;
+            font-size: 12px;
+            height: 18px;
+            overflow: elide;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.hairline;
+        }
+
+        Rectangle {
+            height: 42px;
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                for ed in root.editor: HorizontalLayout {
+                    spacing: 8px;
+
+                    if root.editing: AppButton {
+                        horizontal-stretch: 0;
+                        quiet: true;
+                        text: ed.archived ? "Restore" : "Archive";
+                        clicked => {
+                            if ed.archived {
+                                root.restore(ed.id);
+                            } else {
+                                root.archive(ed.id);
+                            }
+                        }
+                    }
+
+                    if root.editing: AppButton {
+                        horizontal-stretch: 0;
+                        danger: true;
+                        text: "Delete";
+                        clicked => {
+                            root.delete-task(ed.id);
+                        }
+                    }
+                }
+
+                AppButton {
+                    horizontal-stretch: 0;
+                    quiet: true;
+                    text: "Cancel";
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+
+                AppButton {
+                    horizontal-stretch: 0;
+                    primary: true;
+                    text: "Save";
+                    clicked => {
+                        root.save();
+                    }
+                }
+
+                // Absorbs the surplus so the buttons keep their natural width.
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+}

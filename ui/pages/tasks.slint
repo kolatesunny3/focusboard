@@ -1,0 +1,641 @@
+// Tasks page: toolbar, table, plus the shared picker and filter panels used
+// inside app-level popups. Task create/edit lives in the modal task form.
+import { CheckBox, ComboBox, LineEdit, ListView, ScrollView } from "std-widgets.slint";
+import { AppButton, Chip, SectionLabel } from "../widgets/controls.slint";
+import { ColumnInfo, FilterRow, PickOption, TaskRow } from "../model.slint";
+import { Theme } from "../theme.slint";
+
+component NavRow inherits Rectangle {
+    in property <int> index: 0;
+    in property <TaskRow> data;
+    in property <bool> selected;
+    in property <bool> dragging;
+    in property <bool> drop-line;
+    callback pick;
+    callback drag-start(int);
+    callback drag-move(length);
+    callback drag-end;
+    callback drag-cancel;
+
+    // Title column plus one column per attribute cell.
+    property <int> column-count: root.data.cells.length + 1;
+
+    height: Theme.row-height;
+    border-radius: 6px;
+    background: root.selected
+        ? Theme.accent-soft
+        : (touch.has-hover && !root.dragging ? Theme.hover : transparent);
+    opacity: root.dragging ? 0.45 : 1;
+
+    // Hairline between rows, like a modern table.
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        width: parent.width;
+        background: Theme.hairline;
+    }
+
+    // Accent bar marking the selected row.
+    if root.selected: Rectangle {
+        x: 0;
+        y: 6px;
+        width: 3px;
+        height: parent.height - 13px;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+
+    // ---- title column ----
+    Rectangle {
+        x: Theme.grid-x(0, root.width, root.column-count);
+        width: Theme.grid-width(0, root.width, root.column-count);
+        height: parent.height;
+        clip: true;
+
+        Text {
+            width: parent.width - (root.data.archived ? 78px : 0px);
+            height: parent.height;
+            text: root.data.title;
+            vertical-alignment: center;
+            overflow: elide;
+            font-weight: 500;
+            color: root.selected ? Theme.accent : Theme.text;
+        }
+
+        if root.data.archived: Text {
+            x: parent.width - 72px;
+            width: 72px;
+            height: parent.height;
+            text: "archived";
+            font-size: 11px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            color: Theme.muted;
+        }
+    }
+
+    // ---- attribute columns ----
+    for cell[i] in root.data.cells: Rectangle {
+        x: Theme.grid-x(i + 1, root.width, root.column-count);
+        width: Theme.grid-width(i + 1, root.width, root.column-count);
+        height: parent.height;
+        clip: true;
+
+        // Dropdown values are drawn as a coloured chip; its width follows the
+        // label, and the spacer keeps it left aligned with its column.
+        if cell.has-dot: HorizontalLayout {
+            y: (parent.height - 21px) / 2;
+            height: 21px;
+
+            Chip {
+                text: cell.text;
+                tint: cell.dot;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+        }
+
+        if !cell.has-dot: Text {
+            width: parent.width;
+            height: parent.height;
+            text: cell.text;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: 13px;
+            color: root.selected ? Theme.accent : Theme.muted;
+        }
+    }
+
+    // Marker showing where the row being dragged would land.
+    if root.drop-line: Rectangle {
+        y: 0;
+        width: parent.width;
+        height: 2px;
+        background: Theme.accent;
+        border-radius: 1px;
+    }
+
+    touch := TouchArea {
+        property <length> press-y;
+        property <bool> armed: false;
+        property <bool> dragged: false;
+
+        // Pressing picks the row; moving the pointer far enough turns the press
+        // into a drag that reorders the rows.
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                self.armed = true;
+                self.dragged = false;
+                self.press-y = self.mouse-y;
+            } else if (event.kind == PointerEventKind.move) {
+                if (self.armed && !self.dragged && Math.abs(self.mouse-y - self.press-y) > 4px) {
+                    self.dragged = true;
+                    root.drag-start(root.index);
+                }
+                if (self.dragged) {
+                    root.drag-move(self.mouse-y - self.press-y);
+                }
+            } else if (event.kind == PointerEventKind.up) {
+                if (self.dragged) {
+                    root.drag-end();
+                } else if (self.armed) {
+                    root.pick();
+                }
+                self.armed = false;
+            } else {
+                // Cancelled (for example the window lost focus): change nothing.
+                if (self.dragged) {
+                    root.drag-cancel();
+                }
+                self.armed = false;
+            }
+        }
+        mouse-cursor: pointer;
+    }
+}
+
+export component TasksPage inherits Rectangle {
+    in property <[TaskRow]> tasks;
+    in property <[ColumnInfo]> columns;
+    in property <string> selected-id;
+    in property <int> total-count;
+    in property <int> shown-count;
+    in property <int> filter-count;
+    in property <bool> show-archived;
+
+    // Drag & drop state of the row list: the row being dragged and where it would
+    // be dropped (-1 = none).
+    property <int> drag-from: -1;
+    property <int> drop-index: -1;
+    property <bool> dragging: false;
+
+    callback quick-add(string);
+    callback search(string);
+    callback toggle-archived(bool);
+    callback open-filters;
+    callback sort-column(int);
+    callback move-task(int, int);
+    callback select-task(string);
+    callback add-task;
+
+    background: Theme.app-bg;
+
+    VerticalLayout {
+        padding: Theme.pad;
+        spacing: Theme.gap;
+
+        // ---------- toolbar ----------
+        Rectangle {
+            height: 48px;
+            background: Theme.surface;
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+
+                LineEdit {
+                    horizontal-stretch: 2;
+                    placeholder-text: "Search tasks\u{2026}";
+                    edited(t) => {
+                        root.search(t);
+                    }
+                }
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    min-width: 180px;
+                    placeholder-text: "Add task\u{2026} (Enter)";
+                    accepted(t) => {
+                        root.quick-add(t);
+                        self.text = "";
+                    }
+                }
+
+                AppButton {
+                    primary: true;
+                    text: "New task";
+                    clicked => {
+                        root.add-task();
+                    }
+                }
+
+                AppButton {
+                    text: root.filter-count > 0 ? "Filters \u{00B7} " + root.filter-count : "Filters";
+                    clicked => {
+                        root.open-filters();
+                    }
+                }
+
+                CheckBox {
+                    text: "Archived";
+                    checked: root.show-archived;
+                    toggled => {
+                        root.toggle-archived(self.checked);
+                    }
+                }
+
+                Text {
+                    width: 62px;
+                    text: root.shown-count + " of " + root.total-count;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    color: Theme.muted;
+                    font-size: 11px;
+                }
+            }
+        }
+
+        // ---------- table + editor ----------
+        HorizontalLayout {
+            spacing: Theme.gap;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                VerticalLayout {
+                    padding: 4px;
+                    spacing: 0px;
+
+                    // header: one Rectangle per column, placed with the same
+                    // geometry functions the rows use (see Theme.grid-x)
+                    Rectangle {
+                        height: 34px;
+                        background: transparent;
+
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            width: parent.width;
+                            background: Theme.border;
+                        }
+
+                        for col[i] in root.columns: Rectangle {
+                            x: Theme.grid-x(i, parent.width, root.columns.length);
+                            width: Theme.grid-width(i, parent.width, root.columns.length);
+                            height: parent.height - 1px;
+                            border-radius: 6px;
+                            background: head-touch.has-hover ? Theme.hover : transparent;
+
+                            Text {
+                                width: parent.width - (col.sort == 0 ? 4px : 22px);
+                                height: parent.height;
+                                text: col.label.to-uppercase();
+                                vertical-alignment: center;
+                                overflow: elide;
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: col.sort == 0 ? Theme.muted : Theme.accent;
+                            }
+
+                            if col.sort != 0: Text {
+                                x: parent.width - 18px;
+                                width: 18px;
+                                height: parent.height;
+                                text: col.sort == 1 ? "\u{2191}" : "\u{2193}";
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                font-size: 12px;
+                                color: Theme.accent;
+                            }
+
+                            head-touch := TouchArea {
+                                clicked => {
+                                    root.sort-column(i);
+                                }
+                                mouse-cursor: pointer;
+                            }
+                        }
+                    }
+
+                    // empty state sits above the (empty) list so it stays visible
+                    if root.shown-count == 0: VerticalLayout {
+                        padding-top: 44px;
+                        spacing: 6px;
+
+                        Text {
+                            text: root.total-count == 0 ? "Nothing planned yet" : "No matching tasks";
+                            font-size: 14px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            color: Theme.text;
+                        }
+
+                        Text {
+                            text: root.total-count == 0
+                                ? "Type a title above and press Enter, or click New task."
+                                : "Try a different search or clear the filters.";
+                            color: Theme.muted;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    // rows
+                    ListView {
+                        vertical-stretch: 1;
+
+                        // Rows are dragged to reorder them (see NavRow); the drop
+                        // index is worked out from how far the pointer travelled.
+                        for row[i] in root.tasks: NavRow {
+                            index: i;
+                            data: row;
+                            selected: row.id == root.selected-id;
+                            dragging: root.dragging && root.drag-from == i;
+                            drop-line: root.dragging && root.drop-index == i && root.drop-index != root.drag-from;
+                            pick => {
+                                root.select-task(row.id);
+                            }
+                            drag-start(i) => {
+                                root.drag-from = i;
+                                root.drop-index = i;
+                                root.dragging = true;
+                            }
+                            drag-move(dy) => {
+                                root.drop-index = Math.max(0, Math.min(root.tasks.length - 1, root.drag-from + Math.round(dy / Theme.row-height)));
+                            }
+                            drag-end => {
+                                if (root.drop-index != root.drag-from) {
+                                    root.move-task(root.drag-from, root.drop-index);
+                                }
+                                root.drag-from = -1;
+                                root.drop-index = -1;
+                                root.dragging = false;
+                            }
+                            drag-cancel => {
+                                root.drag-from = -1;
+                                root.drop-index = -1;
+                                root.dragging = false;
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+}
+
+// ---------- shared picker panel (options for select/multiselect/filters) ----------
+export component PickerPanel inherits Rectangle {
+    in property <string> title;
+    in property <bool> multi;
+    in property <[PickOption]> options;
+
+    callback option-clicked(string);
+    callback close-requested;
+
+    background: Theme.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            Text {
+                text: root.title;
+                font-size: 14px;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+                color: Theme.text;
+            }
+
+            AppButton {
+                quiet: true;
+                text: "Close";
+                clicked => {
+                    root.close-requested();
+                }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 2px;
+
+                if root.options.length == 0: Text {
+                    text: "No options yet \u{2014} add some in Settings.";
+                    color: Theme.muted;
+                }
+
+                for o in root.options: Rectangle {
+                    height: 32px;
+                    border-radius: 7px;
+                    background: option-touch.has-hover ? Theme.hover : transparent;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+
+                        Text {
+                            text: "\u{25CF}";
+                            color: o.swatch;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: o.label + (o.archived ? " (archived)" : "");
+                            color: o.archived ? Theme.muted : Theme.text;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+
+                        if o.selected: Text {
+                            text: "\u{2713}";
+                            vertical-alignment: center;
+                            font-weight: 700;
+                            color: Theme.accent;
+                        }
+                    }
+
+                    option-touch := TouchArea {
+                        clicked => {
+                            root.option-clicked(o.id);
+                        }
+                        mouse-cursor: pointer;
+                    }
+                }
+            }
+        }
+
+        if root.multi: HorizontalLayout {
+            spacing: 6px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            AppButton {
+                primary: true;
+                text: "Done";
+                clicked => {
+                    root.close-requested();
+                }
+            }
+        }
+    }
+}
+
+// ---------- shared filters panel ----------
+export component FiltersPanel inherits Rectangle {
+    in property <[FilterRow]> rows;
+
+    callback text-changed(string, string);
+    callback op-changed(string, int);
+    callback open-pick(string);
+    callback clear-all;
+    callback close-requested;
+
+    background: Theme.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "Filters";
+                font-size: 14px;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                color: Theme.text;
+            }
+
+            AppButton {
+                quiet: true;
+                text: "Clear all";
+                clicked => {
+                    root.clear-all();
+                }
+            }
+
+            AppButton {
+                quiet: true;
+                text: "Close";
+                clicked => {
+                    root.close-requested();
+                }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 10px;
+
+                for f in root.rows: VerticalLayout {
+                    spacing: 4px;
+
+                    SectionLabel {
+                        text: f.label.to-uppercase();
+                    }
+
+                    if f.kind == 0: LineEdit {
+                        text: f.text;
+                        placeholder-text: "contains\u{2026}";
+                        edited(t) => {
+                            root.text-changed(f.field-id, t);
+                        }
+                    }
+
+                    if f.kind == 1: HorizontalLayout {
+                        spacing: 6px;
+
+                        ComboBox {
+                            width: 130px;
+                            model: f.ops;
+                            current-index: f.op-index;
+                            selected => {
+                                root.op-changed(f.field-id, self.current-index);
+                            }
+                        }
+
+                        LineEdit {
+                            horizontal-stretch: 1;
+                            text: f.text;
+                            placeholder-text: "YYYY-MM-DD";
+                            edited(t) => {
+                                root.text-changed(f.field-id, t);
+                            }
+                        }
+                    }
+
+                    if f.kind == 2: ComboBox {
+                        width: 160px;
+                        model: f.ops;
+                        current-index: f.op-index;
+                        selected => {
+                            root.op-changed(f.field-id, self.current-index);
+                        }
+                    }
+
+                    if f.kind == 3: Rectangle {
+                        height: 32px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: choice-touch.has-hover ? Theme.accent : Theme.border;
+                        background: Theme.surface-2;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+
+                            Text {
+                                text: f.summary == "" ? "Choose options\u{2026}" : f.summary;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                color: f.summary == "" ? Theme.muted : Theme.text;
+                            }
+                        }
+
+                        choice-touch := TouchArea {
+                            clicked => {
+                                root.open-pick(f.field-id);
+                            }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+
+                if root.rows.length == 0: Text {
+                    text: "No filterable fields.";
+                    color: Theme.muted;
+                }
+
+                // Absorbs the surplus so the filter rows keep their natural height.
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+            }
+        }
+    }
+}
